@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { ModalEditor } from "../index.js";
+import type { InsertEscapeSettings } from "../settings.js";
 import { stubKeybindings, stubTheme, stubTui } from "./harness.js";
 
 export type NvimParityMode = "normal" | "insert" | "visual" | "visual-line";
@@ -24,6 +28,7 @@ export type NvimParityCase = {
   name: string;
   initial: NvimParityInitialState;
   keys: string[];
+  insertEscape?: InsertEscapeSettings | null;
 };
 
 export type NvimParitySnapshot = {
@@ -72,23 +77,41 @@ const NVIM_MODE_MAP: Record<string, NvimParityMode> = {
 };
 
 const NVIM_DRIVER_LUA = [
-  "local input = vim.json.decode(vim.env.PI_VIM_NVIM_SCENARIO)",
-  "local lines = vim.split(input.text, '\\n', { plain = true })",
-  "if #lines == 0 then lines = { '' } end",
-  "vim.api.nvim_buf_set_lines(0, 0, -1, true, lines)",
-  "vim.fn.setreg('\"', input.register or '')",
-  "vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
-  "if input.mode == 'insert' then vim.cmd('startinsert') else vim.cmd('stopinsert') end",
-  "vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
-  "local keys = table.concat(input.keys, '')",
-  "local term = vim.api.nvim_replace_termcodes(keys, true, false, true)",
-  "vim.api.nvim_feedkeys(term, 'x', false)",
-  "local out_lines = vim.api.nvim_buf_get_lines(0, 0, -1, true)",
-  "local cursor = vim.api.nvim_win_get_cursor(0)",
-  "local snapshot = { text = table.concat(out_lines, '\\n'), cursor = { line = cursor[1] - 1, col = cursor[2] }, mode = vim.api.nvim_get_mode().mode, register = vim.fn.getreg('\"') }",
-  `print('${NVIM_RESULT_PREFIX}' .. vim.json.encode(snapshot))`,
+  "local ok, err = pcall(function()",
+  "  local input = vim.json.decode(vim.env.PI_VIM_NVIM_SCENARIO)",
+  "  local lines = vim.split(input.text, '\\n', { plain = true })",
+  "  if #lines == 0 then lines = { '' } end",
+  "  vim.api.nvim_buf_set_lines(0, 0, -1, true, lines)",
+  "  vim.fn.setreg('\"', input.register or '')",
+  "  vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
+  "  if input.mode == 'insert' then vim.cmd('startinsert') else vim.cmd('stopinsert') end",
+  "  vim.api.nvim_win_set_cursor(0, { input.cursor.line + 1, input.cursor.col })",
+  '  if type(input.insertEscape) == "table" and input.insertEscape.sequence then',
+  "    vim.o.timeoutlen = input.insertEscape.timeoutMs",
+  "    vim.api.nvim_set_keymap('i', input.insertEscape.sequence, '<Esc>', { noremap = true, silent = true })",
+  "  end",
+  "  local keys = table.concat(input.keys, '')",
+  "  local term = vim.api.nvim_replace_termcodes(keys, true, false, true)",
+  "  vim.api.nvim_feedkeys(term, 'x', false)",
+  "  local out_lines = vim.api.nvim_buf_get_lines(0, 0, -1, true)",
+  "  local cursor = vim.api.nvim_win_get_cursor(0)",
+  "  local snapshot = { text = table.concat(out_lines, '\\n'), cursor = { line = cursor[1] - 1, col = cursor[2] }, mode = vim.api.nvim_get_mode().mode, register = vim.fn.getreg('\"') }",
+  `  print('${NVIM_RESULT_PREFIX}' .. vim.json.encode(snapshot))`,
+  "end)",
+  "if not ok then print('PI_VIM_NVIM_ERROR:' .. tostring(err)) end",
   "vim.cmd('qa!')",
 ].join("; ");
+
+let nvimDriverScriptPath: string | null = null;
+
+function getNvimDriverScriptPath(): string {
+  if (nvimDriverScriptPath === null) {
+    const dir = mkdtempSync(path.join(tmpdir(), "pi-vim-nvim-"));
+    nvimDriverScriptPath = path.join(dir, "driver.lua");
+    writeFileSync(nvimDriverScriptPath, NVIM_DRIVER_LUA.replaceAll("; ", "\n"));
+  }
+  return nvimDriverScriptPath;
+}
 
 function toNvimKey(key: string): string {
   switch (key) {
@@ -158,7 +181,9 @@ function takePiSnapshot(editor: ModalEditor): NvimParitySnapshot {
 }
 
 export function runPiParityCase(testCase: NvimParityCase): NvimParitySnapshot {
-  const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+  const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+    insertEscape: testCase.insertEscape ?? null,
+  });
   editor.setClipboardFn(() => undefined);
   editor.setClipboardReadFn(() => null);
   editor.setText(testCase.initial.text);
@@ -186,6 +211,7 @@ export async function runNvimParityCase(
     mode: testCase.initial.mode ?? "normal",
     register: testCase.initial.register ?? "",
     keys: testCase.keys.map(toNvimKey),
+    insertEscape: testCase.insertEscape ?? null,
   };
 
   const child = spawn(
@@ -199,7 +225,7 @@ export async function runNvimParityCase(
       "-u",
       "NONE",
       "-c",
-      `lua ${NVIM_DRIVER_LUA}`,
+      `luafile ${getNvimDriverScriptPath()}`,
     ],
     {
       env: {

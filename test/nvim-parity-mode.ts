@@ -83,6 +83,26 @@ const MODE_SWITCH_PARITY_CASES: NvimParityCase[] = [
     },
     keys: ["\x1b"],
   },
+  {
+    name: "insertEscape jj leaves insert mode and removes the first key",
+    initial: {
+      text: "abc",
+      cursor: { line: 0, col: 3 },
+      mode: "insert",
+    },
+    keys: ["j", "j"],
+    insertEscape: { sequence: "jj", timeoutMs: 1000 },
+  },
+  {
+    name: "insertEscape jk leaves insert mode when configured",
+    initial: {
+      text: "abc",
+      cursor: { line: 0, col: 3 },
+      mode: "insert",
+    },
+    keys: ["j", "k"],
+    insertEscape: { sequence: "jk", timeoutMs: 1000 },
+  },
 ];
 
 describe("nvim parity mode switching", () => {

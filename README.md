@@ -72,6 +72,7 @@ Common quick wins:
 | key | action |
 |---|---|
 | `Esc` / `Ctrl+[` | Insert → Normal mode |
+| Configured `insertEscape` sequence | Insert → Normal mode |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
 | `:` | Normal → EX mini-mode |
 | `i` | Normal → Insert at cursor |
@@ -457,6 +458,22 @@ A typical use is automatic IME switching. Point `modeChange` at any CLI that swi
 ```
 
 pi-vim does not bundle any such tool and does not care which one you use — any shell command works.
+
+### insertEscape
+
+Map a two-key sequence typed in Insert mode to `<Esc>`. The first key is inserted
+as normal text and removed if the second key arrives within `timeoutMs`.
+
+```json
+{
+  "piVim": {
+    "insertEscape": { "sequence": "jj", "timeoutMs": 1000 }
+  }
+}
+```
+
+`sequence` must be exactly two printable ASCII characters. Set to `null` or omit
+to disable (default: disabled).
 
 ---
 

@@ -47,7 +47,61 @@ export type PiVimSettings = {
   // maps at their defaults; `true` → borderSync all "mode"; the never-released
   // `"inherit"` → both maps all "thinking".
   syncBorderColorWithMode?: BorderSyncMode;
+  insertEscape?: InsertEscapeSettings | undefined;
 };
+
+export const DEFAULT_INSERT_ESCAPE_TIMEOUT_MS = 1000;
+
+export type InsertEscapeSettings = {
+  sequence: string;
+  timeoutMs: number;
+};
+
+const MAX_INSERT_ESCAPE_TIMEOUT_MS = 10000;
+
+function isPrintableAsciiKey(ch: string): boolean {
+  const cp = ch.codePointAt(0);
+  return cp !== undefined && cp >= 0x21 && cp <= 0x7e;
+}
+
+function insertEscape(v: unknown): InsertEscapeSettings | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "string") {
+    if (v.trim().length === 0) return undefined;
+    // fall through to validate as if it were { sequence: v }
+    v = { sequence: v };
+  }
+  if (!rec(v)) return undefined;
+  const seq = typeof v.sequence === "string" ? v.sequence.trim() : "";
+  if (
+    seq.length !== 2 ||
+    !isPrintableAsciiKey(seq[0]) ||
+    !isPrintableAsciiKey(seq[1])
+  ) {
+    return undefined;
+  }
+  let timeoutMs = DEFAULT_INSERT_ESCAPE_TIMEOUT_MS;
+  if (v.timeoutMs !== undefined) {
+    if (
+      typeof v.timeoutMs !== "number" ||
+      !Number.isFinite(v.timeoutMs) ||
+      v.timeoutMs <= 0
+    ) {
+      return undefined;
+    }
+    timeoutMs = Math.min(Math.round(v.timeoutMs), MAX_INSERT_ESCAPE_TIMEOUT_MS);
+  }
+  return { sequence: seq, timeoutMs };
+}
+
+export function readPiVimInsertEscape(
+  g: unknown,
+  p: unknown,
+): InsertEscapeSettings | undefined {
+  const v = get(p, "insertEscape");
+  if (v !== M) return insertEscape(v);
+  return insertEscape(get(g, "insertEscape"));
+}
 
 export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
   piDispatch: true,
@@ -274,6 +328,7 @@ function disk(cwd: string): PiVimSettings {
     borderSync: readPiVimBorderSync(g, p),
     labelSync: readPiVimLabelSync(g, p),
     syncBorderColorWithMode: readPiVimBorderSyncSetting(g, p),
+    insertEscape: readPiVimInsertEscape(g, p),
   };
 }
 

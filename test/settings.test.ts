@@ -8,6 +8,7 @@ import {
   readPiVimClipboardMirrorSetting,
   readPiVimExCommandSetting,
   readPiVimGlobalExCommandSetting,
+  readPiVimInsertEscape,
   readPiVimLabelSync,
   readPiVimModeChange,
   readPiVimModeColors,
@@ -676,6 +677,134 @@ describe("piVim exCommand settings resolver", () => {
     assert.equal(
       resolved.warning,
       "Invalid piVim.exCommand copyInputToClipboard; expected a boolean.",
+    );
+  });
+});
+
+describe("piVim insertEscape settings reader", () => {
+  it("returns undefined when the setting is missing", () => {
+    assert.equal(readPiVimInsertEscape(undefined, undefined), undefined);
+    assert.equal(
+      readPiVimInsertEscape({ piVim: {} }, { piVim: {} }),
+      undefined,
+    );
+  });
+
+  it("returns undefined when disabled", () => {
+    assert.equal(
+      readPiVimInsertEscape({ piVim: { insertEscape: null } }, {}),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape({ piVim: { insertEscape: "" } }, {}),
+      undefined,
+    );
+  });
+
+  it("reads a string sequence with the default timeout", () => {
+    assert.deepEqual(
+      readPiVimInsertEscape({ piVim: { insertEscape: "jj" } }, {}),
+      {
+        sequence: "jj",
+        timeoutMs: 1000,
+      },
+    );
+  });
+
+  it("reads an object sequence and timeout", () => {
+    assert.deepEqual(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jk", timeoutMs: 500 } } },
+        {},
+      ),
+      { sequence: "jk", timeoutMs: 500 },
+    );
+  });
+
+  it("lets project settings override global", () => {
+    assert.deepEqual(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: "jj" } },
+        { piVim: { insertEscape: "kk" } },
+      ),
+      { sequence: "kk", timeoutMs: 1000 },
+    );
+  });
+
+  it("rounds and caps timeoutMs", () => {
+    assert.deepEqual(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jj", timeoutMs: 500.7 } } },
+        {},
+      ),
+      { sequence: "jj", timeoutMs: 501 },
+    );
+    assert.deepEqual(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jj", timeoutMs: 60000 } } },
+        {},
+      ),
+      { sequence: "jj", timeoutMs: 10000 },
+    );
+  });
+
+  it("rejects invalid sequences", () => {
+    assert.equal(
+      readPiVimInsertEscape({ piVim: { insertEscape: "j" } }, {}),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape({ piVim: { insertEscape: "jjj" } }, {}),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape({ piVim: { insertEscape: "j " } }, {}),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape({ piVim: { insertEscape: "🙂🙂" } }, {}),
+      undefined,
+    );
+  });
+
+  it("rejects invalid timeouts", () => {
+    assert.equal(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jj", timeoutMs: 0 } } },
+        {},
+      ),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jj", timeoutMs: -1 } } },
+        {},
+      ),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jj", timeoutMs: "fast" } } },
+        {},
+      ),
+      undefined,
+    );
+    assert.equal(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: { sequence: "jj", timeoutMs: NaN } } },
+        {},
+      ),
+      undefined,
+    );
+  });
+
+  it("treats invalid project settings as an override", () => {
+    assert.equal(
+      readPiVimInsertEscape(
+        { piVim: { insertEscape: "jj" } },
+        { piVim: { insertEscape: null } },
+      ),
+      undefined,
     );
   });
 });

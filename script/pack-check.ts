@@ -238,9 +238,16 @@ const THRESHOLDS = {
   // .ts grows — the new parity cases live in test/, which the package excludes.
   // Measured packed 57943 B, unpacked 228770 B. Budgets bumped 57300 -> 58500
   // and 226300 -> 229600, leaving ~557 B / ~830 B headroom. Files stay at 17.
+  //
+  // insert-escape feature: index.ts adds the configurable two-key insert
+  // escape (sequence matching, timeout handling) and settings.ts adds the
+  // whole-feature reader; README documents it. Test-side growth lives in
+  // test/, which the package excludes. Measured packed 58877 B, unpacked
+  // 232738 B. Budgets bumped 58500 -> 59400 and 229600 -> 233600, leaving
+  // ~523 B / ~862 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 58500,
-  maxUnpackedSize: 229600,
+  maxSize: 59400,
+  maxUnpackedSize: 233600,
 } as const;
 
 function compareStrings(a: string, b: string): number {

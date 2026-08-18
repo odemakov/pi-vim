@@ -65,6 +65,7 @@ import {
 import {
   DEFAULT_EX_COMMAND_SETTINGS,
   type ExCommandSettings,
+  type InsertEscapeSettings,
   readPiVimSettings,
   resolveExCommandSettings,
   resolveSurfaceSyncMaps,
@@ -258,6 +259,7 @@ type ModalEditorOptions = {
   // Reverse-video transform applied to the label. When the label defers to the
   // host color it is wrapped with this so it keeps its block styling.
   labelTransform?: ((s: string) => string) | null;
+  insertEscape?: InsertEscapeSettings | null;
 };
 
 export class ModalEditor extends CustomEditor {
@@ -310,6 +312,9 @@ export class ModalEditor extends CustomEditor {
   // Reverse-video transform used by the label, so its defer-to-host branch
   // matches the label's usual background-block styling.
   private labelTransform: ((s: string) => string) | null = null;
+  private readonly insertEscape: InsertEscapeSettings | null = null;
+  private pendingInsertEscape: boolean = false;
+  private pendingInsertEscapeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
   private lastLineCache = { l: "", w: 0, label: "", result: "" };
@@ -359,6 +364,7 @@ export class ModalEditor extends CustomEditor {
     this.borderSync = opts?.borderSync ?? null;
     this.labelSync = opts?.labelSync ?? null;
     this.labelTransform = opts?.labelTransform ?? null;
+    this.insertEscape = opts?.insertEscape ?? null;
     this.installModeBorderColorizer();
   }
 
@@ -524,6 +530,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   override setText(text: string): void {
+    this.cancelInsertEscape();
     this.discardUndoWindow();
     this.clearRedoStack();
     this.clearRepeatState();
@@ -535,6 +542,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   override insertTextAtCursor(text: string): void {
+    this.cancelInsertEscape();
     this.discardUndoWindow();
     this.cancelRepeatableCommand();
     // A host injection mid-insert taints the session: the injected text is not
@@ -1346,6 +1354,8 @@ export class ModalEditor extends CustomEditor {
       }
 
       if ("insert" === this.mode) {
+        if (this.handleInsertEscape(data)) return;
+
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
           super.handleInput(CTRL_E);
           return;
@@ -1484,12 +1494,66 @@ export class ModalEditor extends CustomEditor {
       return;
     }
     if ("insert" === this.mode) {
+      this.cancelInsertEscape();
       this.clearUnderlyingPasteStateIfActive();
       this.setMode("normal");
       if (this.getCursor().col > 0) this.moveCursorBy(-1);
     } else {
       super.handleInput("\x1b"); // pass escape to abort agent
     }
+  }
+
+  private clearInsertEscapeTimer(): void {
+    if (this.pendingInsertEscapeTimer !== null) {
+      clearTimeout(this.pendingInsertEscapeTimer);
+      this.pendingInsertEscapeTimer = null;
+    }
+  }
+
+  private cancelInsertEscape(): void {
+    this.clearInsertEscapeTimer();
+    this.pendingInsertEscape = false;
+  }
+
+  private completeInsertEscape(): void {
+    this.cancelInsertEscape();
+    super.handleInput("\x7f"); // backspace the first typed key
+    this.handleEscape();
+  }
+
+  private handleInsertEscape(data: string): boolean {
+    const cfg = this.insertEscape;
+    if (!cfg) return false;
+
+    // Only single printable keys participate in the sequence.
+    if (!isPrintableInput(data) || data.length !== 1) {
+      this.cancelInsertEscape();
+      return false;
+    }
+
+    const [first, second] = cfg.sequence;
+
+    if (this.pendingInsertEscape) {
+      if (data === second) {
+        this.completeInsertEscape();
+        return true;
+      }
+      // Any other key cancels the pending latch; that key will then be inserted normally.
+      this.cancelInsertEscape();
+      return false;
+    }
+
+    if (data === first) {
+      this.pendingInsertEscape = true;
+      this.pendingInsertEscapeTimer = setTimeout(() => {
+        this.pendingInsertEscapeTimer = null;
+        this.pendingInsertEscape = false;
+      }, cfg.timeoutMs);
+      super.handleInput(data);
+      return true;
+    }
+
+    return false;
   }
 
   private deleteLastPendingExCommandGrapheme(): void {
@@ -4179,6 +4243,7 @@ export default function (pi: ExtensionAPI) {
     const modeColors = resolveModeColors(piVimSettings.modeColors);
     const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
     const { borderSync, labelSync } = resolveSurfaceSyncMaps(piVimSettings);
+    const insertEscape = piVimSettings.insertEscape ?? null;
     const labelColorizers = t
       ? buildModeColorizers(t, modeColors, reverseVideo)
       : null;
@@ -4202,6 +4267,7 @@ export default function (pi: ExtensionAPI) {
         labelSync,
         offBorderColor,
         labelTransform: reverseVideo,
+        insertEscape,
       });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
